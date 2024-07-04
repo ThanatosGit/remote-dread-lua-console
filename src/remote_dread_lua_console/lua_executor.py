@@ -67,7 +67,7 @@ class LuaException(Exception):
 class LuaExecutor(QObject):
     _connection_lock: asyncio.Lock
     _run_code_lock: asyncio.Lock
-    _port = 6969
+    _port = 42069
     _socket: Optional[DreadSocketHolder] = None
     _socket_error: Optional[Exception] = None
     window_signals = WindowSignals()
@@ -111,10 +111,10 @@ class LuaExecutor(QObject):
             case PacketType.PACKET_REMOTE_LUA_EXEC:
                 await self.check_header()
                 self._socket.request_number = (self._socket.request_number  + 1) % 256
-                response = await asyncio.wait_for(self._socket.reader.read(4), timeout=15)
+                response = await asyncio.wait_for(self._socket.reader.read(5), timeout=15)
                 is_success = bool(response[0])
 
-                length_data = response[1:4] + b"\x00"
+                length_data = response[1:5]
                 length = struct.unpack("<l", length_data)[0]
 
                 data: bytes = await asyncio.wait_for(self._socket.reader.read(length), timeout=15)
@@ -148,20 +148,6 @@ class LuaExecutor(QObject):
         if type in [PacketType.PACKET_REMOTE_LUA_EXEC, PacketType.PACKET_HANDSHAKE]:
             retBytes.extend(msg)
         return retBytes
-
-    async def send_keep_alive(self) -> bytes:
-        while self.is_connected():
-            await asyncio.sleep(2)
-            self._socket.writer.write(self.build_packet(PacketType.PACKET_KEEP_ALIVE, None))
-            try:
-                await asyncio.wait_for(self._socket.writer.drain(), timeout=30)
-            except (OSError, asyncio.TimeoutError, struct.error, UnicodeError, RuntimeError) as e:
-                self.logger.warning(
-                    f"Unable to send keep-alive packet to {self._ip}:{self._port}: {e} ({type(e)})"
-                )
-                self._socket_error = LuaException(f"Unable to send keep-alive: {e} ({type(e)})")
-                self.emit_new_message(f"Connection lost")
-                self.disconnect()
 
     async def connect(self) -> bool:
         async with self._connection_lock:
@@ -197,7 +183,6 @@ class LuaExecutor(QObject):
 
 
                 loop = asyncio.get_event_loop()
-                loop.create_task(self.send_keep_alive())
                 loop.create_task(self.read_loop())
 
                 if ip != self._ip:
